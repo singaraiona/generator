@@ -2,21 +2,18 @@ use core::arch::asm;
 
 const DEFAULT_STACK_SIZE: usize = 1024 * 1024 * 8;
 
-pub static mut GEN_CONTEXT: usize = 0;
-
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Default, Copy, Clone)]
 #[repr(C)]
 pub enum State {
-    Available,
-    Running,
-    Ready,
+    #[default]
+    Ready = 0,
+    Done,
 }
 
 pub struct Generator {
-    id: usize,
+    pub id: usize,
     stack: Vec<u8>,
-    ctx: Context,
-    pub state: State,
+    pub ctx: Context,
 }
 
 #[derive(Debug, Default)]
@@ -31,33 +28,23 @@ pub struct Context {
     rbp: u64,
 }
 
-impl Context {
-    pub fn main_ctx() -> Self {
-        let mut ctx = Context::default();
-        unsafe {
-            gen_save_ctx(&mut ctx);
-        }
-        ctx
-    }
-}
-
 impl Generator {
-    pub fn new<F: FnOnce() + 'static>(id: usize, f: F) -> Self {
+    pub fn new(id: usize, f: fn()) -> Self {
         let mut gen = Generator {
             id,
             stack: vec![0_u8; DEFAULT_STACK_SIZE],
             ctx: Context::default(),
-            state: State::Available,
         };
 
         unsafe {
             let s_ptr = gen.stack.as_mut_ptr().offset(DEFAULT_STACK_SIZE as isize);
-            let s_ptr = (s_ptr as usize & !15) as *mut u8;
-            std::ptr::write(s_ptr.offset(-16) as *mut u64, guard as u64);
-            std::ptr::write(s_ptr.offset(-24) as *mut u64, skip as u64);
-            gen.ctx.rsp = s_ptr.offset(-32) as u64;
-            let f = Box::into_raw(Box::new(f));
-            std::ptr::write(gen.ctx.rsp as *mut u64, f as _);
+            let s_ptr = (s_ptr as usize & !15) as *mut u8; // stack must be aligned to 16 bytes
+            std::ptr::write(s_ptr as *mut u64, State::Ready as _); // write state
+            std::ptr::write(s_ptr.offset(-16) as *mut u64, gen_return as u64); // return address
+            std::ptr::write(s_ptr.offset(-24) as *mut u64, skip as u64); // store generator state here
+            gen.ctx.rsp = s_ptr.offset(-32) as u64; // save stack pointer
+            std::ptr::write(gen.ctx.rsp as *mut u64, f as _); // write function pointer
+            gen.ctx.rbp = gen.ctx.rsp; // save base pointer
         }
 
         gen
@@ -65,45 +52,37 @@ impl Generator {
 
     pub fn suspend(&mut self, ctx: &mut Context) {
         unsafe { gen_switch_ctx(&mut self.ctx, ctx) };
-        self.state = State::Ready;
     }
 
     pub fn resume(&mut self, ctx: &mut Context) {
         unsafe { gen_switch_ctx(ctx, &mut self.ctx) };
     }
+
+    pub fn state(&self) -> State {
+        unsafe {
+            let rbp = std::ptr::read((self.ctx.rbp + 32) as *const u64);
+            // println!("RBP: {}", rbp);
+            State::Ready
+        }
+    }
 }
 
-#[no_mangle]
-unsafe extern "C" fn guard() {
-    println!("-------------------------------------- GUARD!!!!!!!!");
-    // asm!("mov [rsp], rsp");
-}
+// This will just pop off the next value from the stack and jump
+// to whatever instructions that address points to.
+// In our case this is the gen_return function
 #[naked]
 unsafe extern "C" fn skip() {
     asm!("ret", options(noreturn))
 }
-#[no_mangle]
+
+// When the generator is done, this will be called
+// Set state to Done and return
 #[naked]
-unsafe extern "C" fn gen_save_ctx(_ctx: *mut Context) {
-    asm!(
-        // preserve old context
-        "mov [rdi + 0x00], rsp",
-        "mov [rdi + 0x08], r15",
-        "mov [rdi + 0x10], r14",
-        "mov [rdi + 0x18], r13",
-        "mov [rdi + 0x20], r12",
-        "mov [rdi + 0x28], rbx",
-        "mov [rdi + 0x30], rbp",
-        "ret",
-        options(noreturn)
-    );
+unsafe extern "C" fn gen_return() {
+    asm!("mov r8, 0x01", "mov [rbp + 0x00], r8", options(noreturn))
 }
 
-unsafe extern "C" fn call_closure(c: Box<dyn FnOnce()>) {
-    c()
-}
-
-#[no_mangle]
+// Switch to a new generator context (preserving the old one)
 #[naked]
 unsafe extern "C" fn gen_switch_ctx(_old_ctx: *mut Context, _new_ctx: *const Context) {
     asm!(

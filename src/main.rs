@@ -1,21 +1,22 @@
 #![feature(naked_functions)]
+#![feature(asm_const)]
 
 mod generator;
 use generator::*;
-
+use std::collections::VecDeque;
 pub static mut RUNTIME: usize = 0;
 
 pub struct Runtime {
-    index: usize,
-    tasks: Vec<Generator>,
+    tasks: VecDeque<Generator>,
+    current: Option<Generator>,
     ctx: Context,
 }
 
 impl Runtime {
     pub fn new() -> Self {
         Runtime {
-            index: 0,
-            tasks: vec![],
+            tasks: Default::default(),
+            current: None,
             ctx: Default::default(),
         }
     }
@@ -28,27 +29,32 @@ impl Runtime {
     }
 
     pub fn run(&mut self) {
-        loop {
-            let len = self.tasks.len();
-            let task = &mut self.tasks[self.index % len];
-            if task.state == State::Ready {
-                self.tasks.remove(self.index);
-                continue;
+        while let Some(task) = self.tasks.pop_front() {
+            self.current = Some(task);
+            self.current.as_mut().unwrap().resume(&mut self.ctx);
+            let task = self.current.take().unwrap();
+            match task.state() {
+                State::Ready => {
+                    self.tasks.push_back(task);
+                }
+                State::Done => {
+                    println!("@@ TASK {} FINISHED", task.id);
+                }
             }
-            task.resume(&mut self.ctx);
         }
+
+        println!("@@ ALL TASKS FINISHED");
     }
 
     pub fn switch(&mut self) {
-        let len = self.tasks.len();
-        let task = &mut self.tasks[self.index];
-        self.index = (self.index + 1) % len;
-        task.suspend(&mut self.ctx);
+        if let Some(task) = self.current.as_mut() {
+            task.suspend(&mut self.ctx);
+        }
     }
 
-    pub fn spawn<F: FnOnce() + 'static>(&mut self, f: F) {
+    pub fn spawn(&mut self, f: fn()) {
         let task = Generator::new(self.tasks.len(), f);
-        self.tasks.push(task);
+        self.tasks.push_back(task);
     }
 }
 
@@ -62,6 +68,7 @@ pub fn yield_thread() {
 pub fn main() {
     let mut runtime = Runtime::new();
     runtime.init();
+
     runtime.spawn(|| {
         println!("THREAD 1 STARTING");
         let id = 1;
@@ -71,6 +78,7 @@ pub fn main() {
         }
         println!("THREAD 1 FINISHED");
     });
+
     runtime.spawn(|| {
         println!("THREAD 2 STARTING");
         let id = 2;
@@ -80,5 +88,6 @@ pub fn main() {
         }
         println!("THREAD 2 FINISHED");
     });
+
     runtime.run();
 }
