@@ -1,5 +1,4 @@
 #![feature(naked_functions)]
-#![feature(asm)]
 
 mod generator;
 use generator::*;
@@ -9,6 +8,7 @@ pub static mut RUNTIME: usize = 0;
 pub struct Runtime {
     index: usize,
     tasks: Vec<Generator>,
+    ctx: Context,
 }
 
 impl Runtime {
@@ -16,6 +16,7 @@ impl Runtime {
         Runtime {
             index: 0,
             tasks: vec![],
+            ctx: Default::default(),
         }
     }
 
@@ -27,34 +28,25 @@ impl Runtime {
     }
 
     pub fn run(&mut self) {
-        self.tasks[0].resume();
+        loop {
+            let len = self.tasks.len();
+            let task = &mut self.tasks[self.index % len];
+            if task.state == State::Ready {
+                self.tasks.remove(self.index);
+                continue;
+            }
+            task.resume(&mut self.ctx);
+        }
     }
 
     pub fn switch(&mut self) {
-        let task = &mut self.tasks[self.index];
-        task.suspend();
-
         let len = self.tasks.len();
-        if self.index == len {
-            self.index = 0;
-        } else {
-            self.index += 1;
-        };
-
         let task = &mut self.tasks[self.index];
-        if !task.resume() {
-            self.tasks.remove(self.index);
-        }
-
-        let len = self.tasks.len();
-        if self.index == len {
-            self.index = 0;
-        } else {
-            self.index += 1;
-        };
+        self.index = (self.index + 1) % len;
+        task.suspend(&mut self.ctx);
     }
 
-    pub fn spawn(&mut self, f: fn()) {
+    pub fn spawn<F: FnOnce() + 'static>(&mut self, f: F) {
         let task = Generator::new(self.tasks.len(), f);
         self.tasks.push(task);
     }
