@@ -39,12 +39,10 @@ impl Generator {
         unsafe {
             let s_ptr = gen.stack.as_mut_ptr().offset(DEFAULT_STACK_SIZE as isize);
             let s_ptr = (s_ptr as usize & !15) as *mut u8; // stack must be aligned to 16 bytes
-            std::ptr::write(s_ptr as *mut u64, State::Ready as _); // write state
-            std::ptr::write(s_ptr.offset(-16) as *mut u64, gen_return as u64); // return address
-            std::ptr::write(s_ptr.offset(-24) as *mut u64, skip as u64); // store generator state here
-            gen.ctx.rsp = s_ptr.offset(-32) as u64; // save stack pointer
+                                                           // std::ptr::write(s_ptr.offset(-16) as *mut u64, f_ret as _);
+            std::ptr::write(s_ptr.offset(-16) as *mut u64, f_ret as _);
+            gen.ctx.rsp = s_ptr.offset(-24) as u64; // save stack pointer
             std::ptr::write(gen.ctx.rsp as *mut u64, f as _); // write function pointer
-            gen.ctx.rbp = gen.ctx.rsp; // save base pointer
         }
 
         gen
@@ -54,37 +52,34 @@ impl Generator {
         unsafe { gen_switch_ctx(&mut self.ctx, ctx) };
     }
 
-    pub fn resume(&mut self, ctx: &mut Context) {
-        unsafe { gen_switch_ctx(ctx, &mut self.ctx) };
+    pub fn resume(&mut self, ctx: &mut Context) -> u64 {
+        unsafe { gen_switch_ctx(ctx, &mut self.ctx) }
     }
 
     pub fn state(&self) -> State {
         unsafe {
-            let rbp = std::ptr::read((self.ctx.rbp + 32) as *const u64);
+            // let rbp = std::ptr::read((self.ctx.rbp + 32) as *const u64);
             // println!("RBP: {}", rbp);
             State::Ready
         }
     }
 }
 
-// This will just pop off the next value from the stack and jump
-// to whatever instructions that address points to.
-// In our case this is the gen_return function
-#[naked]
-unsafe extern "C" fn skip() {
-    asm!("ret", options(noreturn))
-}
+// #[naked]
+// unsafe extern "C" fn f_skip() {
+//     asm!("ret", options(noreturn))
+// }
 
-// When the generator is done, this will be called
-// Set state to Done and return
 #[naked]
-unsafe extern "C" fn gen_return() {
-    asm!("mov r8, 0x01", "mov [rbp + 0x00], r8", options(noreturn))
+unsafe extern "C" fn f_ret() {
+    unsafe {
+        asm!("mov rax, {state}", "ret", state = const(State::Done as u64), options(noreturn))
+    };
 }
 
 // Switch to a new generator context (preserving the old one)
 #[naked]
-unsafe extern "C" fn gen_switch_ctx(_old_ctx: *mut Context, _new_ctx: *const Context) {
+unsafe extern "C" fn gen_switch_ctx(_old_ctx: *mut Context, _new_ctx: *const Context) -> u64 {
     asm!(
         // preserve old context
         "mov [rdi + 0x00], rsp",
@@ -102,7 +97,9 @@ unsafe extern "C" fn gen_switch_ctx(_old_ctx: *mut Context, _new_ctx: *const Con
         "mov r12, [rsi + 0x20]",
         "mov rbx, [rsi + 0x28]",
         "mov rbp, [rsi + 0x30]",
+        "mov rax, {state}",
         "ret",
+        state = const(State::Ready as u64),
         options(noreturn)
     );
 }

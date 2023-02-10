@@ -31,7 +31,8 @@ impl Runtime {
     pub fn run(&mut self) {
         while let Some(task) = self.tasks.pop_front() {
             self.current = Some(task);
-            self.current.as_mut().unwrap().resume(&mut self.ctx);
+            let res = self.current.as_mut().unwrap().resume(&mut self.ctx);
+            println!("{:?}", res);
             let task = self.current.take().unwrap();
             match task.state() {
                 State::Ready => {
