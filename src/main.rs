@@ -31,19 +31,13 @@ impl Runtime {
     pub fn run(&mut self) {
         while let Some(task) = self.tasks.pop_front() {
             self.current = Some(task);
-            self.current.as_mut().unwrap().resume(&mut self.ctx);
+            let res = self.current.as_mut().unwrap().resume(&mut self.ctx);
             let task = self.current.take().unwrap();
-            match task.state() {
-                State::Ready => {
-                    self.tasks.push_back(task);
-                }
-                State::Done => {
-                    println!("@@ TASK {} FINISHED", task.id);
-                }
+            match res {
+                State::Ready => self.tasks.push_back(task),
+                State::Done => {} // just drop the task
             }
         }
-
-        println!("@@ ALL TASKS FINISHED");
     }
 
     pub fn switch(&mut self) {
@@ -52,8 +46,8 @@ impl Runtime {
         }
     }
 
-    pub fn spawn(&mut self, f: fn()) {
-        let task = Generator::new(self.tasks.len(), f);
+    pub fn spawn<F: FnOnce()>(&mut self, f: F) {
+        let task = Generator::new(self.tasks.len(), f, &mut self.ctx);
         self.tasks.push_back(task);
     }
 }
@@ -68,9 +62,10 @@ pub fn yield_thread() {
 pub fn main() {
     let mut runtime = Runtime::new();
     runtime.init();
+    let a = 123;
 
     runtime.spawn(|| {
-        println!("THREAD 1 STARTING");
+        println!("THREAD 1 STARTING: CAPTURED UPVALUE: {}", a);
         let id = 1;
         for i in 0..10 {
             println!("thread: {} counter: {}", id, i);

@@ -29,7 +29,7 @@ pub struct Context {
 }
 
 impl Generator {
-    pub fn new(id: usize, f: fn()) -> Self {
+    pub fn new<F: FnOnce()>(id: usize, f: F, ctx: &mut Context) -> Self {
         let mut gen = Generator {
             id,
             stack: vec![0_u8; DEFAULT_STACK_SIZE],
@@ -39,12 +39,15 @@ impl Generator {
         unsafe {
             let s_ptr = gen.stack.as_mut_ptr().offset(DEFAULT_STACK_SIZE as isize);
             let s_ptr = (s_ptr as usize & !15) as *mut u8; // stack must be aligned to 16 bytes
-            std::ptr::write(s_ptr as *mut u64, State::Ready as _); // write state
-            std::ptr::write(s_ptr.offset(-16) as *mut u64, gen_return as u64); // return address
-            std::ptr::write(s_ptr.offset(-24) as *mut u64, skip as u64); // store generator state here
-            gen.ctx.rsp = s_ptr.offset(-32) as u64; // save stack pointer
-            std::ptr::write(gen.ctx.rsp as *mut u64, f as _); // write function pointer
-            gen.ctx.rbp = gen.ctx.rsp; // save base pointer
+            let boxed_fn = Box::new(move || {
+                f();
+                gen_restore_ctx(ctx);
+            });
+            let f_ptr = Box::into_raw(boxed_fn);
+            std::ptr::write(s_ptr as *mut *mut dyn FnOnce(), f_ptr);
+            gen.ctx.rbp = s_ptr as _;
+            gen.ctx.rsp = s_ptr.offset(-16) as u64;
+            std::ptr::write(gen.ctx.rsp as *mut u64, wrapper as u64);
         }
 
         gen
@@ -54,37 +57,44 @@ impl Generator {
         unsafe { gen_switch_ctx(&mut self.ctx, ctx) };
     }
 
-    pub fn resume(&mut self, ctx: &mut Context) {
-        unsafe { gen_switch_ctx(ctx, &mut self.ctx) };
-    }
-
-    pub fn state(&self) -> State {
-        unsafe {
-            let rbp = std::ptr::read((self.ctx.rbp + 32) as *const u64);
-            // println!("RBP: {}", rbp);
-            State::Ready
-        }
+    pub fn resume(&mut self, ctx: &mut Context) -> State {
+        unsafe { gen_switch_ctx(ctx, &mut self.ctx) }
     }
 }
 
-// This will just pop off the next value from the stack and jump
-// to whatever instructions that address points to.
-// In our case this is the gen_return function
-#[naked]
-unsafe extern "C" fn skip() {
-    asm!("ret", options(noreturn))
+// A wrapper function to call the actual closure
+unsafe extern "C" fn wrapper() {
+    let mut fn_addr: u64;
+    asm!("mov {}, rbp", out(reg) fn_addr);
+    let addr = std::ptr::read(fn_addr as *mut *mut dyn FnOnce());
+    let f = Box::from_raw(addr);
+    f()
 }
 
-// When the generator is done, this will be called
-// Set state to Done and return
+// Restore a generator context (which is assumed to have been saved in runtime)
 #[naked]
-unsafe extern "C" fn gen_return() {
-    asm!("mov r8, 0x01", "mov [rbp + 0x00], r8", options(noreturn))
+unsafe extern "C" fn gen_restore_ctx(ctx: *mut Context) {
+    // rdi = context
+    asm!(
+        "mov rsp, [rdi + 0x00]",
+        "mov r15, [rdi + 0x08]",
+        "mov r14, [rdi + 0x10]",
+        "mov r13, [rdi + 0x18]",
+        "mov r12, [rdi + 0x20]",
+        "mov rbx, [rdi + 0x28]",
+        "mov rbp, [rdi + 0x30]",
+        "mov rax, {state}",
+        "ret",
+        state = const State::Done as u64,
+        options(noreturn)
+    );
 }
 
 // Switch to a new generator context (preserving the old one)
 #[naked]
-unsafe extern "C" fn gen_switch_ctx(_old_ctx: *mut Context, _new_ctx: *const Context) {
+unsafe extern "C" fn gen_switch_ctx(_old: *mut Context, _new: *mut Context) -> State {
+    // rdi = old context
+    // rsi = new context
     asm!(
         // preserve old context
         "mov [rdi + 0x00], rsp",
@@ -102,7 +112,9 @@ unsafe extern "C" fn gen_switch_ctx(_old_ctx: *mut Context, _new_ctx: *const Con
         "mov r12, [rsi + 0x20]",
         "mov rbx, [rsi + 0x28]",
         "mov rbp, [rsi + 0x30]",
+        "mov rax, {state}",
         "ret",
+        state = const State::Ready as u64,
         options(noreturn)
     );
 }
