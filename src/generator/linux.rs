@@ -1,11 +1,13 @@
 use super::{State, DEFAULT_STACK_SIZE};
 use crate::Generator;
 use core::arch::asm;
+use std::panic;
+use std::panic::UnwindSafe;
 
 #[derive(Debug, Default)]
 #[repr(C)]
 pub struct Context {
-    rsp: u64,
+    pub rsp: u64,
     r15: u64,
     r14: u64,
     r13: u64,
@@ -63,12 +65,16 @@ pub unsafe extern "C" fn context_switch(_old_ctx: &mut Context, _new_ctx: &mut C
 }
 
 // Initialize a generator stack with a closure
-pub fn initialize_stack<F: FnOnce()>(gen: &mut Generator, root_ctx: &Context, f: F) {
+pub fn initialize_stack<F: FnOnce() -> R + UnwindSafe, R>(
+    gen: &mut Generator,
+    root_ctx: &Context,
+    f: F,
+) {
     unsafe {
         let s_ptr = gen.stack.as_mut_ptr().offset(DEFAULT_STACK_SIZE as isize);
         let s_ptr = (s_ptr as usize & !15) as *mut u8; // stack must be aligned to 16 bytes
         let boxed_fn = Box::new(move || {
-            f();
+            let _res = panic::catch_unwind(f);
             context_restore(root_ctx);
         });
         let f_ptr = Box::into_raw(boxed_fn);

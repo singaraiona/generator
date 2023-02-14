@@ -31,7 +31,7 @@ pub struct Context {
 // Restore a generator context (which is assumed to have been saved in runtime)
 #[naked]
 pub unsafe extern "C" fn context_restore(ctx: &Context) {
-    // rdi = context
+    // rcx = context
     asm!(
         "movaps xmm6, [rcx + 0x00]",
         "movaps xmm7, [rcx + 0x10]",
@@ -66,8 +66,8 @@ pub unsafe extern "C" fn context_restore(ctx: &Context) {
 // Switch to a new generator context (preserving the old one)
 #[naked]
 pub unsafe extern "C" fn context_switch(_old_ctx: &mut Context, _new_ctx: &mut Context) -> State {
-    // rdi = old context
-    // rsi = new context
+    // rcx = old context
+    // rdx = new context
     asm!(
         // preserve old context
         "movaps [rcx + 0x00], xmm6",
