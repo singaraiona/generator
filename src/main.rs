@@ -7,6 +7,8 @@ use std::collections::VecDeque;
 use std::panic::UnwindSafe;
 pub static mut RUNTIME: usize = 0;
 
+const DEFAULT_STACK_SIZE: usize = 1024 * 1024 * 8;
+
 pub struct Runtime {
     tasks: VecDeque<Generator>,
     current: Option<Generator>,
@@ -35,11 +37,13 @@ impl Runtime {
             self.current = Some(task);
             let res = self.current.as_mut().unwrap().resume(&mut self.ctx);
             let mut task = self.current.take().unwrap();
+            let id = task.id();
             match res {
                 State::Pending => {
-                    if cnt % 3 == 0 {
+                    // simulate task cancelling
+                    if cnt % 6 == 0 {
                         task.cancel(&mut self.ctx);
-                        println!("TASK {} CANCELLED", task.id());
+                        println!("TASK {} CANCELLED", id);
                     } else {
                         self.tasks.push_back(task);
                     }
@@ -58,7 +62,7 @@ impl Runtime {
     }
 
     pub fn spawn<F: FnOnce() -> R + UnwindSafe, R>(&mut self, f: F) {
-        let task = Generator::new(self.tasks.len(), f, &mut self.ctx);
+        let task = Generator::new(self.tasks.len(), DEFAULT_STACK_SIZE, f, &mut self.ctx);
         self.tasks.push_back(task);
     }
 }
@@ -85,24 +89,24 @@ pub fn main() {
     let s = MyStruct {};
 
     runtime.spawn(|| {
-        println!("THREAD 1 STARTING: CAPTURED UPVALUE: {:?}", s);
-        let id = 1;
+        let id = 0;
+        println!("THREAD {} STARTING: CAPTURED UPVALUE: {:?}", id, s);
         for i in 0..10 {
             println!("thread: {} counter: {}", id, i);
             yield_thread();
         }
-        println!("THREAD 1 FINISHED");
+        println!("THREAD {} FINISHED", id);
     });
 
-    // runtime.spawn(|| {
-    //     println!("THREAD 2 STARTING");
-    //     let id = 2;
-    //     for i in 0..15 {
-    //         println!("thread: {} counter: {}", id, i);
-    //         yield_thread();
-    //     }
-    //     println!("THREAD 2 FINISHED");
-    // });
+    runtime.spawn(|| {
+        let id = 1;
+        println!("THREAD {} STARTING", id);
+        for i in 0..15 {
+            println!("thread: {} counter: {}", id, i);
+            yield_thread();
+        }
+        println!("THREAD {} FINISHED", id);
+    });
 
     runtime.run();
 }

@@ -11,12 +11,9 @@ mod windows;
 #[cfg(target_os = "windows")]
 pub use windows::*;
 
-use std::arch::asm;
 use std::panic;
 use std::panic::UnwindSafe;
 use std::thread;
-
-const DEFAULT_STACK_SIZE: usize = 1024 * 1024 * 8;
 
 #[derive(PartialEq, Eq, Debug, Default, Copy, Clone)]
 #[repr(C)]
@@ -30,17 +27,33 @@ pub struct Generator {
     id: usize,
     stack: Vec<u8>,
     ctx: Context,
+    run: bool,
 }
 
 impl Generator {
-    pub fn new<F: FnOnce() -> R + UnwindSafe, R>(id: usize, f: F, root_ctx: &mut Context) -> Self {
+    pub fn new<F: FnOnce() -> R + UnwindSafe, R>(
+        id: usize,
+        stack_size: usize,
+        f: F,
+        root_ctx: &Context,
+    ) -> Self {
+        let aligned_stack_size = stack_size.next_power_of_two();
+
         let mut gen = Generator {
             id,
-            stack: vec![0_u8; DEFAULT_STACK_SIZE],
+            stack: vec![0_u8; aligned_stack_size],
             ctx: Context::default(),
+            run: true,
         };
 
-        initialize_stack(&mut gen, root_ctx, f);
+        // Wrap the function in a closure to catch the (possible) panic
+        let wrapper = move || {
+            let _res = panic::catch_unwind(f);
+
+            unsafe { context_restore(root_ctx) };
+        };
+
+        initialize_stack(&mut gen, wrapper);
 
         gen
     }
@@ -52,6 +65,10 @@ impl Generator {
     // Switch to a preserved context, interrupting execution of the current generator
     pub fn suspend(&mut self, ctx: &mut Context) {
         unsafe { context_switch(&mut self.ctx, ctx) };
+        // this block will be executed when the generator is resumed
+        if !self.run {
+            panic::panic_any("Generator cancelled");
+        }
     }
 
     // Switch to a preserved context, resuming execution of the current generator
@@ -59,43 +76,16 @@ impl Generator {
         unsafe { context_switch(ctx, &mut self.ctx) }
     }
 
+    // Terminate the generator, preventing it from being resumed
     pub fn cancel(&mut self, ctx: &mut Context) {
-        unsafe {
-            asm!(
-            "mov [{old_ctx} + 0x00], rsp",
-            "mov [{old_ctx} + 0x08], r15",
-            "mov [{old_ctx} + 0x10], r14",
-            "mov [{old_ctx} + 0x18], r13",
-            "mov [{old_ctx} + 0x20], r12",
-            "mov [{old_ctx} + 0x28], rbx",
-            "mov [{old_ctx} + 0x30], rbp",
-
-            "mov rsp, [{new_ctx} + 0x00]",
-            "mov r15, [{new_ctx} + 0x08]",
-            "mov r14, [{new_ctx} + 0x10]",
-            "mov r13, [{new_ctx} + 0x18]",
-            "mov r12, [{new_ctx} + 0x20]",
-            "mov rbx, [{new_ctx} + 0x28]",
-            "mov rbp, [{new_ctx} + 0x30]",
-            "mov rax, {addr}",
-            "push rax",
-            "ret",
-            addr = in(reg) cancel_generator as u64,
-            old_ctx = in(reg) ctx as *mut Context,
-            new_ctx = in(reg) &mut self.ctx as *mut Context,
-            )
-        }
+        self.run = false;
+        // Temporary replace the panic hook to avoid printing default panic message when the generator is cancelled
+        let old = panic::take_hook();
+        panic::set_hook(Box::new(|_| {}));
+        self.resume(ctx);
+        // Restore the panic hook
+        panic::set_hook(old);
     }
-}
-
-unsafe extern "C" fn cancel_generator() -> ! {
-    println!("CANCEL GENERATOR");
-    // let old = panic::take_hook();
-    // panic::set_hook(Box::new(|msg| {
-    //     println!("CANCEL GENERATOR: {}", msg);
-    // }));
-    panic::panic_any("Generator cancelled");
-    // panic::set_hook(old);
 }
 
 impl Drop for Generator {
