@@ -99,15 +99,15 @@ pub fn main() {
         println!("THREAD {} FINISHED", id);
     });
 
-    // runtime.spawn(|| {
-    //     let id = 1;
-    //     println!("THREAD {} STARTING", id);
-    //     for i in 0..15 {
-    //         println!("thread: {} counter: {}", id, i);
-    //         yield_thread();
-    //     }
-    //     println!("THREAD {} FINISHED", id);
-    // });
+    runtime.spawn(|| {
+        let id = 1;
+        println!("THREAD {} STARTING", id);
+        for i in 0..15 {
+            println!("thread: {} counter: {}", id, i);
+            yield_thread();
+        }
+        println!("THREAD {} FINISHED", id);
+    });
 
     runtime.run();
 }

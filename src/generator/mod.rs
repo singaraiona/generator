@@ -23,9 +23,9 @@ pub enum State {
 }
 
 pub struct Generator {
+    ctx: Context, // Context must be the first field cause it utilize aligned instructions
     id: usize,
     stack: Vec<u8>,
-    ctx: Context,
     run: bool,
 }
 

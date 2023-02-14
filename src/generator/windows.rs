@@ -4,7 +4,7 @@ use core::arch::asm;
 use std::panic::UnwindSafe;
 
 #[derive(Debug, Default)]
-#[repr(C)]
+#[repr(C, align(16))]
 pub struct Context {
     xmm6: [u64; 2],
     xmm7: [u64; 2],
