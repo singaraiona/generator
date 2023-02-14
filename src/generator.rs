@@ -11,9 +11,9 @@ pub enum State {
 }
 
 pub struct Generator {
-    pub id: usize,
+    id: usize,
     stack: Vec<u8>,
-    pub ctx: Context,
+    ctx: Context,
 }
 
 #[derive(Debug, Default)]
@@ -44,28 +44,35 @@ impl Generator {
                 gen_restore_ctx(ctx);
             });
             let f_ptr = Box::into_raw(boxed_fn);
-            std::ptr::write(s_ptr as *mut *mut dyn FnOnce(), f_ptr);
-            gen.ctx.rbp = s_ptr as _;
-            gen.ctx.rsp = s_ptr.offset(-16) as u64;
-            std::ptr::write(gen.ctx.rsp as *mut u64, wrapper as u64);
+            std::ptr::write(s_ptr.offset(-16) as *mut *mut dyn FnOnce(), f_ptr);
+            gen.ctx.rsp = s_ptr.offset(-32) as u64;
+            std::ptr::write(gen.ctx.rsp as *mut u64, init as u64);
+            println!("new: rsp = {:x}", gen.ctx.rsp);
         }
 
         gen
     }
 
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
+    // Switch to a preserved context, interrupting execution of the current generator
     pub fn suspend(&mut self, ctx: &mut Context) {
         unsafe { gen_switch_ctx(&mut self.ctx, ctx) };
     }
 
+    // Switch to a preserved context, resuming execution of the current generator
     pub fn resume(&mut self, ctx: &mut Context) -> State {
         unsafe { gen_switch_ctx(ctx, &mut self.ctx) }
     }
 }
 
-// A wrapper function to call the actual closure
-unsafe extern "C" fn wrapper() {
-    let mut fn_addr: u64;
-    asm!("mov {}, rbp", out(reg) fn_addr);
+// A initial function to call the actual closure
+// We can abuse using of rsi that was filled in gen_switch_ctx
+// This need just for the first time when we switch to a new generator
+unsafe extern "C" fn init(_old_ctx: &Context, _new_ctx: &Context) {
+    let fn_addr = (*_new_ctx).rsp + 16; // move to the address of the closure
     let addr = std::ptr::read(fn_addr as *mut *mut dyn FnOnce());
     let f = Box::from_raw(addr);
     f()
@@ -92,7 +99,7 @@ unsafe extern "C" fn gen_restore_ctx(ctx: *mut Context) {
 
 // Switch to a new generator context (preserving the old one)
 #[naked]
-unsafe extern "C" fn gen_switch_ctx(_old: *mut Context, _new: *mut Context) -> State {
+unsafe extern "C" fn gen_switch_ctx(_old_ctx: &mut Context, _new_ctx: &mut Context) -> State {
     // rdi = old context
     // rsi = new context
     asm!(
