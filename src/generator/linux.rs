@@ -4,9 +4,9 @@ use core::arch::asm;
 use std::panic::UnwindSafe;
 
 #[derive(Debug, Default)]
-#[repr(C)]
+#[repr(C, align(16))]
 pub struct Context {
-    pub rsp: u64,
+    rsp: u64,
     r15: u64,
     r14: u64,
     r13: u64,
