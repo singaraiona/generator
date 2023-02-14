@@ -1,6 +1,7 @@
-use super::{State, DEFAULT_STACK_SIZE};
+use super::State;
 use crate::Generator;
 use core::arch::asm;
+use std::panic::UnwindSafe;
 
 #[derive(Debug, Default)]
 #[repr(C)]
@@ -125,16 +126,13 @@ pub unsafe extern "C" fn context_switch(_old_ctx: &mut Context, _new_ctx: &mut C
 }
 
 // Initialize a generator stack with a closure
-pub fn initialize_stack<F: FnOnce()>(gen: &mut Generator, root_ctx: &Context, f: F) {
+pub fn initialize_stack<F: FnOnce() -> R + UnwindSafe, R>(gen: &mut Generator, f: F) {
     unsafe {
-        let s_ptr = gen.stack.as_mut_ptr().offset(DEFAULT_STACK_SIZE as isize);
+        let s_ptr = gen.stack.as_mut_ptr().offset(gen.stack.len() as isize);
         let s_ptr = (s_ptr as usize & !15) as *mut u8; // stack must be aligned to 16 bytes
-        let boxed_fn = Box::new(move || {
-            f();
-            context_restore(root_ctx);
-        });
+        let boxed_fn = Box::new(f);
         let f_ptr = Box::into_raw(boxed_fn);
-        std::ptr::write(s_ptr.offset(-16) as *mut *mut dyn FnOnce(), f_ptr);
+        std::ptr::write(s_ptr.offset(-16) as *mut *mut dyn FnOnce() -> R, f_ptr);
         gen.ctx.rsp = s_ptr.offset(-32) as u64;
         std::ptr::write(gen.ctx.rsp as *mut u64, initialize_code as u64);
         gen.ctx.stack_start = s_ptr as u64;

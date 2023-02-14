@@ -32,6 +32,7 @@ impl Runtime {
     }
 
     pub fn run(&mut self) {
+        println!("starting execution..");
         let mut cnt = 1;
         while let Some(task) = self.tasks.pop_front() {
             self.current = Some(task);
@@ -98,15 +99,15 @@ pub fn main() {
         println!("THREAD {} FINISHED", id);
     });
 
-    runtime.spawn(|| {
-        let id = 1;
-        println!("THREAD {} STARTING", id);
-        for i in 0..15 {
-            println!("thread: {} counter: {}", id, i);
-            yield_thread();
-        }
-        println!("THREAD {} FINISHED", id);
-    });
+    // runtime.spawn(|| {
+    //     let id = 1;
+    //     println!("THREAD {} STARTING", id);
+    //     for i in 0..15 {
+    //         println!("thread: {} counter: {}", id, i);
+    //         yield_thread();
+    //     }
+    //     println!("THREAD {} FINISHED", id);
+    // });
 
     runtime.run();
 }

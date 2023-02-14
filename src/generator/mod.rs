@@ -11,8 +11,7 @@ mod windows;
 #[cfg(target_os = "windows")]
 pub use windows::*;
 
-use std::panic;
-use std::panic::UnwindSafe;
+use std::panic::{self, UnwindSafe};
 use std::thread;
 
 #[derive(PartialEq, Eq, Debug, Default, Copy, Clone)]
