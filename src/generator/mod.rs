@@ -17,8 +17,8 @@ const DEFAULT_STACK_SIZE: usize = 1024 * 1024 * 8;
 #[repr(C)]
 pub enum State {
     #[default]
-    Ready = 0,
-    Done,
+    Pending = 0,
+    Ready,
 }
 
 pub struct Generator {

@@ -34,8 +34,8 @@ impl Runtime {
             let res = self.current.as_mut().unwrap().resume(&mut self.ctx);
             let task = self.current.take().unwrap();
             match res {
-                State::Ready => self.tasks.push_back(task),
-                State::Done => {} // just drop the task
+                State::Pending => self.tasks.push_back(task),
+                State::Ready => {} // just drop the task
             }
         }
     }

@@ -5,7 +5,7 @@ use core::arch::asm;
 #[derive(Debug, Default)]
 #[repr(C)]
 pub struct Context {
-    pub rsp: u64,
+    rsp: u64,
     r15: u64,
     r14: u64,
     r13: u64,
@@ -28,7 +28,7 @@ pub unsafe extern "C" fn context_restore(ctx: &Context) {
         "mov rbp, [rdi + 0x30]",
         "mov rax, {state}",
         "ret",
-        state = const State::Done as u64,
+        state = const State::Ready as u64,
         options(noreturn)
     );
 }
@@ -57,7 +57,7 @@ pub unsafe extern "C" fn context_switch(_old_ctx: &mut Context, _new_ctx: &mut C
         "mov rbp, [rsi + 0x30]",
         "mov rax, {state}",
         "ret",
-        state = const State::Ready as u64,
+        state = const State::Pending as u64,
         options(noreturn)
     );
 }
