@@ -49,7 +49,6 @@ impl Generator {
         // Wrap the function in a closure to catch the (possible) panic
         let wrapper = move || {
             let _res = panic::catch_unwind(f);
-
             unsafe { context_restore(root_ctx) };
         };
 
@@ -64,10 +63,12 @@ impl Generator {
 
     // Switch to a preserved context, interrupting execution of the current generator
     pub fn suspend(&mut self, ctx: &mut Context) {
-        unsafe { context_switch(&mut self.ctx, ctx) };
-        // this block will be executed when the generator is resumed
-        if !self.run {
-            panic::panic_any("Generator cancelled");
+        unsafe {
+            context_switch(&mut self.ctx, ctx);
+            // this block will be executed when the generator is resumed
+            if !std::ptr::read_volatile(&self.run) {
+                panic::panic_any("Generator cancelled");
+            }
         }
     }
 
@@ -78,7 +79,7 @@ impl Generator {
 
     // Terminate the generator, preventing it from being resumed
     pub fn cancel(&mut self, ctx: &mut Context) {
-        self.run = false;
+        unsafe { std::ptr::write_volatile(&mut self.run, false) };
         // Temporary replace the panic hook to avoid printing default panic message when the generator is cancelled
         let old = panic::take_hook();
         panic::set_hook(Box::new(|_| {}));
