@@ -71,8 +71,8 @@ pub fn initialize_stack<F: FnOnce() -> R + UnwindSafe, R>(gen: &mut Generator, f
         let boxed_fn = Box::new(f);
         let f_ptr = Box::into_raw(boxed_fn);
         std::ptr::write(s_ptr.offset(-16) as *mut *mut dyn FnOnce() -> R, f_ptr);
-        gen.ctx.rsp = s_ptr.offset(-32) as u64;
-        std::ptr::write(gen.ctx.rsp as *mut u64, initialize_code as u64);
+        gen.reg.self_context.rsp = s_ptr.offset(-32) as u64;
+        std::ptr::write(gen.reg.self_context.rsp as *mut u64, initialize_code as u64);
     }
 }
 

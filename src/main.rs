@@ -12,7 +12,6 @@ const DEFAULT_STACK_SIZE: usize = 1024 * 1024 * 8;
 pub struct Runtime {
     tasks: VecDeque<Generator>,
     current: Option<Generator>,
-    ctx: Context,
 }
 
 impl Runtime {
@@ -20,7 +19,6 @@ impl Runtime {
         Runtime {
             tasks: Default::default(),
             current: None,
-            ctx: Default::default(),
         }
     }
 
@@ -36,14 +34,14 @@ impl Runtime {
         let mut cnt = 1;
         while let Some(task) = self.tasks.pop_front() {
             self.current = Some(task);
-            let res = self.current.as_mut().unwrap().resume(&mut self.ctx);
+            let res = self.current.as_mut().unwrap().resume();
             let mut task = self.current.take().unwrap();
             let id = task.id();
             match res {
                 State::Pending => {
                     // simulate task cancelling
                     if cnt % 6 == 0 {
-                        task.cancel(&mut self.ctx);
+                        task.cancel();
                         println!("TASK {} CANCELLED", id);
                     } else {
                         self.tasks.push_back(task);
@@ -58,12 +56,12 @@ impl Runtime {
 
     pub fn switch(&mut self) {
         if let Some(task) = self.current.as_mut() {
-            task.suspend(&mut self.ctx);
+            task.suspend();
         }
     }
 
     pub fn spawn<F: FnOnce() -> R + UnwindSafe, R>(&mut self, f: F) {
-        let task = Generator::new(self.tasks.len(), DEFAULT_STACK_SIZE, f, &mut self.ctx);
+        let task = Generator::new(self.tasks.len(), DEFAULT_STACK_SIZE, f);
         self.tasks.push_back(task);
     }
 }
